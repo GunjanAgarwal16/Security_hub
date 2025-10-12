@@ -57,7 +57,7 @@ st.markdown("""
         border: 2px solid rgba(255, 255, 255, 0.1);
         border-radius: 15px;
         padding: 2rem;
-        margin: 1rem 0;
+        margin: 1rem 0 0.5rem 0;  /* Reduced bottom margin to remove blank space */
     }
 
     .stButton > button {
@@ -140,9 +140,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Simple encryption functions
+# FIXED encryption/decryption functions
 def encrypt_image_data(image_array):
-    """Simple AES-256 encryption"""
+    """FIXED AES-256 encryption with proper data handling"""
     try:
         key = os.urandom(32)
         img_bytes = image_array.tobytes()
@@ -157,38 +157,60 @@ def encrypt_image_data(image_array):
         encryptor = cipher.encryptor()
         encrypted = encryptor.update(padded) + encryptor.finalize()
 
-        return key, iv + encrypted, len(img_bytes), image_array.shape
-    except Exception:
-        return None, None, None, None
-
-def decrypt_image_data(key, encrypted_data, original_size, shape):
-    """Simple AES-256 decryption"""
-    try:
-        iv = encrypted_data[:16]
-        encrypted = encrypted_data[16:]
-
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-        decryptor = cipher.decryptor()
-        padded = decryptor.update(encrypted) + decryptor.finalize()
-
-        padding = padded[-1]
-        original = padded[:-padding][:original_size]
-
-        return np.frombuffer(original, dtype=np.uint8).reshape(shape)
-    except Exception:
+        # Return all needed info for decryption
+        return {
+            'key': key,
+            'encrypted_data': iv + encrypted,
+            'original_size': len(img_bytes),
+            'original_shape': image_array.shape,
+            'dtype': str(image_array.dtype)
+        }
+    except Exception as e:
+        st.error(f"Encryption error: {str(e)}")
         return None
 
-# Initialize session state
+def decrypt_image_data(encryption_info):
+    """FIXED AES-256 decryption with proper error handling"""
+    try:
+        key = encryption_info['key']
+        encrypted_data = encryption_info['encrypted_data']
+        original_size = encryption_info['original_size']
+        original_shape = encryption_info['original_shape']
+
+        # Extract IV and encrypted bytes
+        iv = encrypted_data[:16]
+        encrypted_bytes = encrypted_data[16:]
+
+        # Decrypt
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        padded_data = decryptor.update(encrypted_bytes) + decryptor.finalize()
+
+        # Remove padding
+        padding_length = padded_data[-1]
+        original_data = padded_data[:-padding_length]
+
+        # Ensure we have the exact original size
+        original_data = original_data[:original_size]
+
+        # Convert back to image array
+        decrypted_array = np.frombuffer(original_data, dtype=np.uint8)
+        decrypted_image = decrypted_array.reshape(original_shape)
+
+        return decrypted_image
+    except Exception as e:
+        st.error(f"Decryption error: {str(e)}")
+        return None
+
+# Initialize session state with FIXED structure
 if 'image' not in st.session_state:
     st.session_state.image = None
-if 'encrypted' not in st.session_state:
-    st.session_state.encrypted = None
-if 'key' not in st.session_state:
-    st.session_state.key = None
+if 'encryption_info' not in st.session_state:
+    st.session_state.encryption_info = None
 if 'decrypted' not in st.session_state:
     st.session_state.decrypted = None
-if 'image_info' not in st.session_state:
-    st.session_state.image_info = {}
+if 'image_name' not in st.session_state:
+    st.session_state.image_name = ""
 
 # Title
 st.markdown("""
@@ -219,13 +241,10 @@ if uploaded:
             image.thumbnail((800, 600), Image.Resampling.LANCZOS)
 
         st.session_state.image = np.array(image)
-        st.session_state.image_info = {
-            'name': uploaded.name,
-            'size': f"{image.width}×{image.height}"
-        }
+        st.session_state.image_name = uploaded.name
 
         st.image(image, caption=f"✅ Loaded: {uploaded.name}", width=400)
-        st.success(f"Image ready: {st.session_state.image_info['size']} pixels")
+        st.success(f"Image ready: {image.width}×{image.height} pixels")
 
     except Exception as e:
         st.error(f"Error loading image: {str(e)}")
@@ -245,7 +264,7 @@ elif st.session_state.image is None:
             sample[80:180, 190:240] = [100, 100, 255]  # Blue bar
 
             st.session_state.image = sample
-            st.session_state.image_info = {'name': 'sample_chart.png', 'size': '300×200'}
+            st.session_state.image_name = 'sample_chart.png'
             st.rerun()
 
     with col2:
@@ -258,20 +277,20 @@ elif st.session_state.image is None:
             sample[135:150, 40:180] = [100, 100, 100]  # Line 3
 
             st.session_state.image = sample
-            st.session_state.image_info = {'name': 'sample_doc.png', 'size': '300×200'}
+            st.session_state.image_name = 'sample_doc.png'
             st.rerun()
 
 # Show currently loaded image
 if st.session_state.image is not None and uploaded is None:
     st.image(
         st.session_state.image, 
-        caption=f"Current: {st.session_state.image_info['name']}", 
+        caption=f"Current: {st.session_state.image_name}", 
         width=400
     )
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Step 2: Action Buttons
+# Step 2: Action Buttons - FIXED spacing
 if st.session_state.image is not None:
     st.markdown('<div class="action-buttons">', unsafe_allow_html=True)
     st.markdown("## ⚡ Step 2: Choose Action")
@@ -282,13 +301,19 @@ if st.session_state.image is not None:
         st.markdown('<div class="encrypt-button">', unsafe_allow_html=True)
         if st.button("🔐 ENCRYPT", use_container_width=True):
             with st.spinner("Encrypting with AES-256..."):
-                key, encrypted, size, shape = encrypt_image_data(st.session_state.image)
+                progress = st.progress(0)
 
-                if key and encrypted:
-                    st.session_state.key = key
-                    st.session_state.encrypted = encrypted
-                    st.session_state.image_info.update({'size_bytes': size, 'shape': shape})
-                    st.session_state.decrypted = None
+                # FIXED encryption
+                encryption_info = encrypt_image_data(st.session_state.image)
+
+                progress.progress(50)
+                time.sleep(0.5)
+
+                if encryption_info:
+                    st.session_state.encryption_info = encryption_info
+                    st.session_state.decrypted = None  # Clear previous decryption
+
+                    progress.progress(100)
                     st.success("🔐 Encryption completed!")
                     st.rerun()
                 else:
@@ -298,33 +323,35 @@ if st.session_state.image is not None:
     with col2:
         st.markdown('<div class="decrypt-button">', unsafe_allow_html=True)
         if st.button("🔓 DECRYPT", use_container_width=True):
-            if st.session_state.encrypted and st.session_state.key:
+            if st.session_state.encryption_info:
                 with st.spinner("Decrypting..."):
-                    decrypted = decrypt_image_data(
-                        st.session_state.key,
-                        st.session_state.encrypted,
-                        st.session_state.image_info['size_bytes'],
-                        st.session_state.image_info['shape']
-                    )
+                    progress = st.progress(0)
 
-                    if decrypted is not None:
-                        st.session_state.decrypted = decrypted
+                    progress.progress(50)
+                    time.sleep(0.5)
+
+                    # FIXED decryption
+                    decrypted_image = decrypt_image_data(st.session_state.encryption_info)
+
+                    progress.progress(100)
+
+                    if decrypted_image is not None:
+                        st.session_state.decrypted = decrypted_image
                         st.success("🔓 Decryption successful!")
                         st.rerun()
                     else:
                         st.error("Decryption failed!")
             else:
-                st.error("No encrypted data to decrypt!")
+                st.error("No encrypted data to decrypt! Please encrypt an image first.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col3:
         st.markdown('<div class="clear-button">', unsafe_allow_html=True)
         if st.button("🗑️ CLEAR", use_container_width=True):
             st.session_state.image = None
-            st.session_state.encrypted = None
-            st.session_state.key = None
+            st.session_state.encryption_info = None
             st.session_state.decrypted = None
-            st.session_state.image_info = {}
+            st.session_state.image_name = ""
             st.success("Cleared all data!")
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
@@ -335,7 +362,7 @@ if st.session_state.image is not None:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# Step 3: Results
+# Step 3: Results - FIXED spacing
 st.markdown('<div class="result-section">', unsafe_allow_html=True)
 st.markdown("## 📋 Step 3: Results")
 
@@ -358,13 +385,13 @@ if st.session_state.decrypted is not None:
     st.download_button(
         "📥 Download Decrypted Image",
         data=buf.getvalue(),
-        file_name=f"decrypted_{st.session_state.image_info.get('name', 'image')}.png",
+        file_name=f"decrypted_{st.session_state.image_name}",
         mime="image/png",
         use_container_width=True
     )
 
 # Show encrypted info
-elif st.session_state.encrypted is not None:
+elif st.session_state.encryption_info is not None:
     # Show scrambled visualization
     if st.session_state.image is not None:
         scrambled = np.random.randint(0, 255, st.session_state.image.shape, dtype=np.uint8)
@@ -378,20 +405,19 @@ elif st.session_state.encrypted is not None:
     """, unsafe_allow_html=True)
 
     # Show key
-    if st.session_state.key:
-        key_hex = st.session_state.key.hex().upper()
-        st.markdown(f"""
-        <div class="key-display">
-            <strong>🔑 ENCRYPTION KEY - SAVE THIS!</strong><br>
-            {key_hex}
-        </div>
-        """, unsafe_allow_html=True)
+    key_hex = st.session_state.encryption_info['key'].hex().upper()
+    st.markdown(f"""
+    <div class="key-display">
+        <strong>🔑 ENCRYPTION KEY - SAVE THIS!</strong><br>
+        {key_hex}
+    </div>
+    """, unsafe_allow_html=True)
 
     # Download encrypted file
     st.download_button(
         "📥 Download Encrypted File",
-        data=st.session_state.encrypted,
-        file_name=f"encrypted_{st.session_state.image_info.get('name', 'image')}.dat",
+        data=st.session_state.encryption_info['encrypted_data'],
+        file_name=f"encrypted_{st.session_state.image_name}.dat",
         mime="application/octet-stream",
         use_container_width=True
     )
