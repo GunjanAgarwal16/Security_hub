@@ -9,7 +9,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Dark theme CSS with excellent visibility
+# SAME dark theme CSS - keeping it unchanged
 st.markdown("""
 <style>
     .stApp {
@@ -59,14 +59,6 @@ st.markdown("""
         font-size: 1.2rem;
     }
 
-    .video-preview {
-        background: rgba(0, 0, 0, 0.3);
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 1rem 0;
-        border: 2px solid rgba(102, 126, 234, 0.3);
-    }
-
     .stButton > button {
         background: linear-gradient(45deg, #667eea, #764ba2) !important;
         color: white !important;
@@ -95,11 +87,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
+# Initialize session state with proper reset functionality
 if 'analysis_done' not in st.session_state:
     st.session_state.analysis_done = False
 if 'telegram_sent' not in st.session_state:
     st.session_state.telegram_sent = False
+if 'current_video_type' not in st.session_state:
+    st.session_state.current_video_type = None
 
 # Header
 st.markdown("""
@@ -113,7 +107,21 @@ st.markdown("""
 if st.button("← Back to SIA Hub", key="back_main"):
     st.switch_page("app.py")
 
-# Sidebar with model info
+# CLEAR BUTTON - This was the main issue!
+col_header1, col_header2 = st.columns([3, 1])
+with col_header2:
+    if st.button("🗑️ Clear Results", key="clear_all", use_container_width=True):
+        st.session_state.analysis_done = False
+        st.session_state.telegram_sent = False
+        st.session_state.current_video_type = None
+        if 'violence_detected' in st.session_state:
+            del st.session_state['violence_detected']
+        if 'confidence_score' in st.session_state:
+            del st.session_state['confidence_score']
+        st.success("✅ Cleared! Ready for new analysis")
+        st.rerun()
+
+# Sidebar
 with st.sidebar:
     st.markdown("## 🧠 AI Model Details")
     st.markdown("""
@@ -144,38 +152,39 @@ with col1:
 
     if uploaded_video is not None:
         st.success(f"✅ Video: {uploaded_video.name} ({uploaded_video.size/1024/1024:.1f} MB)")
+        st.session_state.current_video_type = "uploaded"
 
         # Show video preview
         st.markdown("**📺 Video Preview:**")
         st.video(uploaded_video)
 
-    # Sample videos with descriptions
+    # Sample videos
     st.markdown("### 🎬 Sample Videos:")
 
     col_sample1, col_sample2 = st.columns(2)
 
     with col_sample1:
         if st.button("📱 Safe Activity Sample", key="safe_sample", use_container_width=True):
-            st.session_state.sample_video = "safe"
+            st.session_state.current_video_type = "safe"
             st.success("✅ Safe sample loaded!")
             st.info("🎥 **Preview**: People walking in park - peaceful environment")
 
     with col_sample2:
         if st.button("⚠️ Violence Sample", key="violence_sample", use_container_width=True):
-            st.session_state.sample_video = "violence"  
+            st.session_state.current_video_type = "violence"
             st.success("✅ Violence sample loaded!")
             st.warning("🎥 **Preview**: Physical confrontation - aggressive behavior")
 
 with col2:
     st.markdown("### ⚙️ Settings")
-
     confidence = st.slider("🎯 Confidence", 0.5, 0.95, 0.85)
     face_detect = st.checkbox("👤 Face Detection", True)
     smoothing = st.checkbox("📈 Smoothing", True)
 
 # Analysis button
 if st.button("🔍 Analyze Video for Violence", type="primary", use_container_width=True):
-    has_video = uploaded_video is not None or st.session_state.get('sample_video')
+    current_video = st.session_state.get('current_video_type')
+    has_video = uploaded_video is not None or current_video
 
     if has_video:
         with st.spinner("🔄 Analyzing video..."):
@@ -184,24 +193,31 @@ if st.button("🔍 Analyze Video for Violence", type="primary", use_container_wi
                 progress.progress(i + 1)
                 time.sleep(0.03)
 
-            # Generate results
-            if st.session_state.get('sample_video') == 'violence':
+            # FIXED: Proper detection based on video type
+            if current_video == 'violence':
                 violence_detected = True
                 confidence_score = 0.94
-            else:
+            elif current_video == 'safe':
                 violence_detected = False
                 confidence_score = 0.89
+            else:  # uploaded video
+                # For demo: random but weighted toward safe
+                violence_detected = np.random.choice([True, False], p=[0.25, 0.75])
+                confidence_score = np.random.uniform(0.85, 0.96)
 
         # Store results
         st.session_state.analysis_done = True
         st.session_state.violence_detected = violence_detected
         st.session_state.confidence_score = confidence_score
+        st.rerun()
+    else:
+        st.error("⚠️ Please upload a video or select a sample!")
 
 # Display results
 if st.session_state.get('analysis_done'):
     st.markdown("---")
 
-    if st.session_state.violence_detected:
+    if st.session_state.get('violence_detected'):
         st.markdown(f"""
         <div class="result-violence">
             <h1>🚨 VIOLENCE DETECTED</h1>
@@ -210,7 +226,7 @@ if st.session_state.get('analysis_done'):
         </div>
         """, unsafe_allow_html=True)
 
-        # Action buttons for violence
+        # Action buttons
         st.markdown("### 🚨 Security Actions")
         col1, col2 = st.columns(2)
 
@@ -220,44 +236,34 @@ if st.session_state.get('analysis_done'):
                 st.rerun()
 
         with col2:
-            # Working download button
             report = f"""Violence Detection Report
 
 Classification: VIOLENCE DETECTED
 Confidence: {st.session_state.confidence_score:.1%}
+Video Type: {st.session_state.current_video_type or 'uploaded'}
 Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}
-Alert Level: HIGH
 
-Key Findings:
+Analysis Results:
 - Aggressive motion patterns detected
-- Physical confrontation identified  
 - High-intensity movements observed
-- Multiple subjects involved
-
-Recommended Actions:
-- Immediate security response
-- Review full video footage
-- Contact emergency services if needed
-- Document incident for investigation
+- Security alert recommended
 
 Generated by SIA Hub Violence Detection System"""
 
             st.download_button(
-                "📊 Download Analysis Report",
+                "📊 Download Report",
                 data=report,
                 file_name=f"violence_report_{time.strftime('%Y%m%d_%H%M%S')}.txt",
                 mime="text/plain",
                 use_container_width=True
             )
 
-        # Show telegram alert status
-        if st.session_state.telegram_sent:
+        if st.session_state.get('telegram_sent'):
             st.markdown(f"""
             <div class="alert-success">
                 <h3>📱 Telegram Alert Sent!</h3>
-                <p>✅ Security team notified via Telegram bot</p>
+                <p>✅ Security team notified</p>
                 <p>🔔 Alert ID: VD-{hex(int(time.time()))[-6:].upper()}</p>
-                <p>⏰ Time: {time.strftime('%H:%M:%S')}</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -278,13 +284,13 @@ Generated by SIA Hub Violence Detection System"""
         st.markdown("#### 📈 Metrics")
         st.metric("Frames", "847")
         st.metric("Time", "15.3s")
-        st.metric("Motion", "8.7/10" if st.session_state.violence_detected else "3.2/10")
+        st.metric("Motion", "8.7/10" if st.session_state.get('violence_detected') else "3.2/10")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col2:
         st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
         st.markdown("#### 🎯 Indicators")
-        if st.session_state.violence_detected:
+        if st.session_state.get('violence_detected'):
             indicators = ["Aggressive patterns", "Physical confrontation", "High intensity"]
         else:
             indicators = ["Normal activity", "Peaceful behavior", "Safe environment"]
